@@ -31,6 +31,7 @@ func main() {
 		logErr(err)
 		return
 	}
+	defer res.Body.Close()
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		fmt.Println("=========================================")
@@ -60,6 +61,7 @@ func main() {
 					fmt.Println(res.StatusCode, res.Status)
 					fmt.Println("=========================================")
 				}
+				defer res.Body.Close()
 				body, _ := ioutil.ReadAll(res.Body)
 				reg, err := regexp.Compile(videoHashRegex)
 				if err != nil {
@@ -80,7 +82,11 @@ func main() {
 		fmt.Println(res.StatusCode, res.Status)
 		fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
 		fmt.Println("=========================================")
-		//_, _ = getDownloadUrl(hashs)
+		hashSize := len(hashs)
+		for i := 0; i < hashSize; i++ {
+			fmt.Println(hashs[i])
+			fmt.Println(getDownloadUrl(hashs[i]))
+		}
 	}
 
 	et := time.Now()
@@ -127,33 +133,24 @@ type downloadUrlStruct struct {
 
 const downloadBaseUrl = `https://ecchi.iwara.tv/api/video/`
 
-func getDownloadUrl(hashs []string) (urls []string, err error) {
-	for i := 0; i < len(hashs); i++ {
-		res, e := http.Get(downloadBaseUrl + hashs[i])
-		if e != nil {
-			fmt.Println(e.Error())
+func getDownloadUrl(hashs string) (urls string, err error) {
+	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
+		err, _ = recover().(error) // 프로그램이 죽는경우 살린다
+		if err != nil {            // 죽이고 살린 후 처리
+			fmt.Println(err)
 		}
-		body, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			fmt.Println("=========================================")
-			fmt.Println(res.StatusCode, res.Status)
-			fmt.Println("client error: ", err)
-			fmt.Println("=========================================")
-		}
-		var ress []downloadUrlStruct
+	}()
+	res, _ := http.Get(downloadBaseUrl + hashs)
+	defer res.Body.Close()
+	body, _ := ioutil.ReadAll(res.Body)
 
-		if err := json.Unmarshal(body, &ress); err != nil {
-			fmt.Println("=========================================")
-			fmt.Println("body parse error: ", err)
-			fmt.Println("=========================================")
-			continue
-		}
-		for i := 0; i < len(ress); i++ {
-			if ress[i].Resolution == `Source` {
-				fmt.Println("successful get url")
-				fmt.Println(ress[i].Uri)
-				urls = append(urls, `https:`+ress[i].Uri)
-			}
+	var ress []downloadUrlStruct
+	_ = json.Unmarshal(body, &ress)
+
+	for i := 0; i < len(ress); i++ {
+		if ress[i].Resolution == `Source` {
+			urls = `https:` + ress[i].Uri
+			return
 		}
 	}
 	return
