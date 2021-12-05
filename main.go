@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/pterm/pterm"
 	"github.com/thftgr/iwaraDownloader/iwaraApi"
 	"github.com/thftgr/iwaraDownloader/pool"
 	"github.com/thftgr/iwaraDownloader/src"
@@ -40,7 +41,6 @@ func init() {
 }
 
 func main() {
-	//https://ecchi.iwara.tv/users/2199504910/videos
 	for _, uploader := range src.Uploaders {
 		syncs(uploader)
 	}
@@ -56,8 +56,6 @@ func syncs(username string) {
 	st := time.Now()
 
 	URL = "https://ecchi.iwara.tv/users/" + USERNAME
-	//URL = "https://ecchi.iwara.tv/users/%E8%BF%99%E8%85%BF%E5%80%9Fwo%E7%8E%A9%E4%B8%80%E5%A4%A9?language=ja"
-	//USERNAME = iwaraApi.GetUsername(&URL)
 	err := iwaraApi.GetBaseUrl(&URL)
 	if err != nil {
 		fmt.Println("cannot parse iwara user URL")
@@ -126,13 +124,14 @@ func syncs(username string) {
 	for i := 0; i < hashSize; i++ {
 		dirName, _ := url.QueryUnescape(USERNAME)
 		i := i
-		if src.FileList[strings.ToUpper(hashs[i])].File != nil {
 
-			fmt.Println(hashs[i], "O")
+		if src.FileList[strings.ToUpper(hashs[i])].File != nil {
+			fmt.Println(pterm.Green("O\t", hashs[i]))
 			continue
 		} else {
-			fmt.Println(hashs[i], "X")
+			fmt.Println(pterm.Red("X\t", hashs[i]))
 		}
+
 		jobs = append(jobs, func() interface{} {
 
 			downloadUrl, _ := iwaraApi.GetDownloadUrl(hashs[i])
@@ -154,7 +153,9 @@ func syncs(username string) {
 			return err
 		})
 	}
-	pool.StartPool(jobs, 4)
+	if len(jobs) > 1 {
+		pool.StartPool(jobs, 4)
+	}
 
 	et := time.Now()
 	fmt.Println("Total Time:", et.UnixMilli()-st.UnixMilli(), "ms")

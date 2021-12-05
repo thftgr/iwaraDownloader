@@ -1,9 +1,15 @@
 package pool
 
-func worker(jobs <-chan func() interface{}, results chan<- interface{}) {
+import (
+	"github.com/pterm/pterm"
+)
+
+func worker(number int, jobs <-chan func() interface{}, results chan<- interface{}) {
+	pterm.Info.Println("goroutine worker ", number, "started")
 	for j := range jobs {
 		results <- j()
 	}
+	pterm.Info.Println("goroutine worker ", number, "ended")
 }
 
 func StartPool(fs Jobs, poolSize int) (v []interface{}) {
@@ -12,7 +18,7 @@ func StartPool(fs Jobs, poolSize int) (v []interface{}) {
 	res := make(chan interface{}, jobLength)
 
 	for w := 0; w < poolSize; w++ {
-		go worker(jobs, res)
+		go worker(w, jobs, res)
 	}
 
 	for j := 0; j < jobLength; j++ {
