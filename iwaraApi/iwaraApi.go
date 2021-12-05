@@ -2,8 +2,8 @@ package iwaraApi
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -55,7 +55,7 @@ func GetDownloadUrl(hashs string) (urls string, err error) {
 	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
 		err, _ = recover().(error) // 프로그램이 죽는경우 살린다
 		if err != nil {            // 죽이고 살린 후 처리
-			fmt.Println(err)
+			log.Println(err)
 		}
 	}()
 	res, _ := http.Get(downloadBaseUrl + hashs)
@@ -75,17 +75,16 @@ func GetDownloadUrl(hashs string) (urls string, err error) {
 }
 
 func GetMaxPage(body *[]byte) (page int) {
-	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
-		err, _ := recover().(error) // 프로그램이 죽는경우 살린다
-		if err != nil {             // 죽이고 살린 후 처리
-			fmt.Println(err)
+	defer func() {
+		err, _ := recover().(error)
+		if err != nil {
 			page = 0
 		}
 	}()
 
 	reg, _ := regexp.Compile(`<li class="pager-last last"><a title=".+?" href="/users/.+?/videos\?.*?page=([0-9]{1,3})">`)
 	urls := reg.FindAllStringSubmatch(string(*body), -1)
-	page, _ = strconv.Atoi(urls[0][1]) // 널 포인터 에러가 날것임 => 별다른 처리가 없다면 프로그램이 죽는다
+	page, _ = strconv.Atoi(urls[0][1])
 	return
 }
 

@@ -28,17 +28,3 @@ func StartPool(fs Jobs, poolSize int) (v []interface{}) {
 }
 
 type Jobs []func() interface{}
-
-//func main() {
-//	var o []func() interface{}
-//	for i := 0; i < 10; i++ {
-//		ii := i
-//		o = append(o, func() interface{} {
-//			time.Sleep(time.Second)
-//			fmt.Println(ii * 2)
-//			return ii * 2
-//		})
-//	}
-//	fmt.Println(StartPool(o, 10))
-//
-//}

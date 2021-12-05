@@ -5,11 +5,21 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"regexp"
+	"strings"
 	"sync"
 )
 
+type FileData struct {
+	ServerKey string
+	Uploader  string
+	FullPath  string
+	File      fs.FileInfo
+}
+
 var (
-	FileList    = map[string]map[string]fs.FileInfo{}
+	//FileList    = map[string]fs.FileInfo{}
+	FileList    = map[string]FileData{}
+	Uploaders   = []string{}
 	mutex       = sync.Mutex{}
 	regFilename *regexp.Regexp
 )
@@ -19,30 +29,58 @@ func init() {
 }
 
 func ReadDir(path string) {
-
-	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
-		err, _ := recover().(error) // 프로그램이 죽는경우 살린다
+	defer func() {
+		err, _ := recover().(error)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("", err)
 		}
 	}()
+	if path[len(path)-1:] == "/" {
+		path = path[:len(path)-1]
+	}
+
 	files, _ := ioutil.ReadDir(path)
 	for _, file := range files {
+		fileName := file.Name()
+
 		if file.IsDir() {
-			fmt.Println("find Dir:", path+"/"+file.Name())
-			ReadDir(path + "/" + file.Name())
-		} else {
-			if regFilename.Match([]byte(file.Name())) {
-				names := regFilename.FindAllStringSubmatch(file.Name(), -1)
-				mutex.Lock()
-				if FileList[names[0][1]] == nil {
-					FileList[names[0][1]] = map[string]fs.FileInfo{}
-					FileList[names[0][1]][names[0][2]] = file
-				} else {
-					FileList[names[0][1]][names[0][2]] = file
-				}
-				mutex.Unlock()
+			if path[len(path)-1:] != "/" {
+				path += "/"
 			}
+			fmt.Println("find Dir:", path+fileName)
+			ReadDir(path + fileName)
+			Uploaders = append(Uploaders, fileName)
+		} else {
+			if !regFilename.Match([]byte(fileName)) {
+				continue
+			}
+			r := regFilename.FindAllStringSubmatch(fileName, -1)[0]
+			uploader := r[1]
+			serverKey := r[2]
+			mutex.Lock()
+
+			FileList[strings.ToUpper(serverKey)] = FileData{
+				ServerKey: serverKey,
+				Uploader:  uploader,
+				FullPath:  path,
+				File:      file,
+			}
+			mutex.Unlock()
+
 		}
 	}
+	Uploaders = removeDuplicate(Uploaders)
+
+}
+func removeDuplicate(sa []string) (sr []string) {
+
+	allKeys := make(map[string]bool)
+
+	for _, item := range sa {
+		if _, value := allKeys[item]; !value {
+			allKeys[item] = true
+			sr = append(sr, item)
+		}
+	}
+	return
 }

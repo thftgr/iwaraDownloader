@@ -6,41 +6,68 @@ import (
 	"github.com/thftgr/iwaraDownloader/pool"
 	"github.com/thftgr/iwaraDownloader/src"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
-const rootDownloadPath = `./iwara/`
+var rootDownloadPath = `./iwara`
+
+//const rootDownloadPath = `Y:/private/iwara/`
 
 func init() {
+	if rootDownloadPath[len(rootDownloadPath)-1:] != "/" {
+		rootDownloadPath += "/"
+	}
+	log.SetFlags(log.Ldate | log.Ltime | log.Llongfile | log.Lmsgprefix)
 	src.ReadDir(rootDownloadPath)
+
+	//indent, _ := json.MarshalIndent(src.FileList, "", "  ")
+	//fmt.Println(string(indent))
+	//fmt.Println("///////////////////////////////////////////////////////////////////////////")
+	//indent, _ = json.MarshalIndent(src.FileList, "", "  ")
+	//fmt.Println(string(indent))
+
+	//indent, _ := json.MarshalIndent(src.Uploaders, "", "  ")
+	//fmt.Println(string(indent))
+
 }
 
 func main() {
+	//https://ecchi.iwara.tv/users/2199504910/videos
+	for _, uploader := range src.Uploaders {
+		syncs(uploader)
+	}
+}
+
+func syncs(username string) {
+	//return
 	var (
-		USERNAME string
+		USERNAME = url.QueryEscape(username)
 		URL      string
 	)
 
 	st := time.Now()
-	URL = "https://ecchi.iwara.tv/users/%E8%BF%99%E8%85%BF%E5%80%9Fwo%E7%8E%A9%E4%B8%80%E5%A4%A9?language=ja"
-	//URL := "https://ecchi.iwara.tv/users/%E4%B8%89%E4%BB%81%E6%9C%88%E9%A5%BC"
+
+	URL = "https://ecchi.iwara.tv/users/" + USERNAME
+	//URL = "https://ecchi.iwara.tv/users/%E8%BF%99%E8%85%BF%E5%80%9Fwo%E7%8E%A9%E4%B8%80%E5%A4%A9?language=ja"
+	//USERNAME = iwaraApi.GetUsername(&URL)
 	err := iwaraApi.GetBaseUrl(&URL)
-	USERNAME = iwaraApi.GetUsername(&URL)
 	if err != nil {
 		fmt.Println("cannot parse iwara user URL")
-		panic(err)
+		return
 	}
 	fmt.Println(URL)
 
 	res, err := http.Get(URL)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	defer res.Body.Close()
@@ -52,92 +79,94 @@ func main() {
 		fmt.Println("=========================================")
 	}
 	page := iwaraApi.GetMaxPage(&body) + 1
-	{
-		ch := make(chan struct{}, page)
-		var hashs []string
-		mutex := sync.Mutex{}
-		for i := 0; i < page; i++ {
-			i := i
-			go func() {
-				defer func() {
-					ch <- struct{}{}
-					err, _ = recover().(error)
-					if err != nil {
-						fmt.Println(err.Error())
-					}
-				}()
 
-				res, _ := http.Get(URL + `?page=` + strconv.Itoa(i))
-				if res.StatusCode != http.StatusOK {
-					fmt.Println("=========================================")
-					fmt.Println(res.StatusCode, res.Status)
-					fmt.Println("=========================================")
+	ch := make(chan struct{}, page)
+	var hashs []string
+	mutex := sync.Mutex{}
+	for i := 0; i < page; i++ {
+		i := i
+		go func() {
+			defer func() {
+				ch <- struct{}{}
+				err, _ = recover().(error)
+				if err != nil {
+					log.Println(err)
 				}
-				defer res.Body.Close()
-				body, _ := ioutil.ReadAll(res.Body)
-				reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
-				urls := reg.FindAllStringSubmatch(string(body), -1)
-				mutex.Lock()
-				defer mutex.Unlock()
-				hashs = append(hashs, iwaraApi.GetSubMatchData(urls, 1)...)
 			}()
-		}
-		for i := 0; i < page; i++ {
-			<-ch
-		}
-		fmt.Println("=========================================")
-		//fmt.Println(strings.Join(hashs, "\n"))
-		fmt.Println(res.StatusCode, res.Status)
-		fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
-		fmt.Println("=========================================")
 
-		hashSize := len(hashs)
-
-		//hashSize = 1 //테스트용
-
-		jobs := pool.Jobs{}
-		for i := 0; i < hashSize; i++ {
-			fmt.Println(hashs[i])
-			dirName, _ := url.QueryUnescape(USERNAME)
-			i := i
-			if src.FileList[dirName] != nil {
-				if src.FileList[dirName][hashs[i]] != nil {
-					continue
-				}
+			res, _ := http.Get(URL + `?page=` + strconv.Itoa(i))
+			if res.StatusCode != http.StatusOK {
+				fmt.Println("=========================================")
+				fmt.Println(res.StatusCode, res.Status)
+				fmt.Println("=========================================")
 			}
-			jobs = append(jobs, func() interface{} {
-
-				downloadUrl, _ := iwaraApi.GetDownloadUrl(hashs[i])
-				fileName := fmt.Sprintf("%s_%s.mp4", dirName, hashs[i])
-				fmt.Println(downloadUrl)
-				fmt.Println(fmt.Sprintf("filename : %s_%s.mp4", dirName, hashs[i]))
-				fmt.Println("==========================================")
-				fmt.Println("started download.")
-				fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
-				fmt.Println("filename:", fileName)
-				fmt.Println("==========================================")
-				b, _ := iwaraApi.DownloadFile(&downloadUrl)
-				err = saveLocal(&b, rootDownloadPath+dirName+"/", fileName)
-				fmt.Println("==========================================")
-				fmt.Println("download Finished.")
-				fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
-				fmt.Println("filename:", fileName)
-				fmt.Println("==========================================")
-				return err
-			})
-		}
-		pool.StartPool(jobs, 4)
+			defer res.Body.Close()
+			body, _ := ioutil.ReadAll(res.Body)
+			reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
+			urls := reg.FindAllStringSubmatch(string(body), -1)
+			mutex.Lock()
+			defer mutex.Unlock()
+			hashs = append(hashs, iwaraApi.GetSubMatchData(urls, 1)...)
+		}()
 	}
+	for i := 0; i < page; i++ {
+		<-ch
+	}
+	fmt.Println("=========================================")
+	//fmt.Println(strings.Join(hashs, "\n"))
+	fmt.Println(res.StatusCode, res.Status)
+	fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
+	fmt.Println("=========================================")
+
+	hashSize := len(hashs)
+
+	//hashSize = 1 //테스트용
+
+	jobs := pool.Jobs{}
+	for i := 0; i < hashSize; i++ {
+		dirName, _ := url.QueryUnescape(USERNAME)
+		i := i
+		if src.FileList[strings.ToUpper(hashs[i])].File != nil {
+
+			fmt.Println(hashs[i], "O")
+			continue
+		} else {
+			fmt.Println(hashs[i], "X")
+		}
+		jobs = append(jobs, func() interface{} {
+
+			downloadUrl, _ := iwaraApi.GetDownloadUrl(hashs[i])
+			fileName := fmt.Sprintf("%s_%s.mp4", dirName, hashs[i])
+			fmt.Println(downloadUrl)
+			fmt.Println("filename: ", fileName)
+			fmt.Println("==========================================")
+			fmt.Println("started download.")
+			fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
+			fmt.Println("filename:", fileName)
+			fmt.Println("==========================================")
+			b, _ := iwaraApi.DownloadFile(&downloadUrl)
+			err = saveLocal(&b, rootDownloadPath+dirName+"/", fileName)
+			fmt.Println("==========================================")
+			fmt.Println("download Finished.")
+			fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
+			fmt.Println("filename:", fileName)
+			fmt.Println("==========================================")
+			return err
+		})
+	}
+	pool.StartPool(jobs, 4)
 
 	et := time.Now()
 	fmt.Println("Total Time:", et.UnixMilli()-st.UnixMilli(), "ms")
-
 }
 func saveLocal(data *[]byte, dir, name string) (err error) {
 	defer func() {
 		err, _ = recover().(error)
 	}()
-	fullPath := dir + "_" + name
+	if dir[len(dir)-1:] != "/" {
+		dir += "/"
+	}
+	fullPath := dir + name
 	_ = os.MkdirAll(dir, 775)
 	file, _ := os.Create(fullPath + ".idownload")
 	if file == nil {
