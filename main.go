@@ -3,11 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/thftgr/iwaraDownloader/pool"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -15,18 +16,23 @@ import (
 const videoHashRegex = `<a href="/videos/(.+?)(?:[?].+?|["])>`
 
 func main() {
+	var (
+		USERNAME string
+		URL      string
+	)
 
 	st := time.Now()
-	url := "https://ecchi.iwara.tv/users/%E8%BF%99%E8%85%BF%E5%80%9Fwo%E7%8E%A9%E4%B8%80%E5%A4%A9?language=ja"
-	//url := "https://ecchi.iwara.tv/users/%E4%B8%89%E4%BB%81%E6%9C%88%E9%A5%BC"
-	err := getBaseUrl(&url)
+	URL = "https://ecchi.iwara.tv/users/%E8%BF%99%E8%85%BF%E5%80%9Fwo%E7%8E%A9%E4%B8%80%E5%A4%A9?language=ja"
+	//URL := "https://ecchi.iwara.tv/users/%E4%B8%89%E4%BB%81%E6%9C%88%E9%A5%BC"
+	err := getBaseUrl(&URL)
+	USERNAME = getUsername(&URL)
 	if err != nil {
-		fmt.Println("cannot parse iwara user url")
+		fmt.Println("cannot parse iwara user URL")
 		panic(err)
 	}
-	fmt.Println(url)
+	fmt.Println(URL)
 
-	res, err := http.Get(url)
+	res, err := http.Get(URL)
 	if err != nil {
 		logErr(err)
 		return
@@ -55,7 +61,7 @@ func main() {
 					}
 				}()
 
-				res, _ := http.Get(url + `?page=` + strconv.Itoa(i))
+				res, _ := http.Get(URL + `?page=` + strconv.Itoa(i))
 				if res.StatusCode != http.StatusOK {
 					fmt.Println("=========================================")
 					fmt.Println(res.StatusCode, res.Status)
@@ -78,20 +84,39 @@ func main() {
 			<-ch
 		}
 		fmt.Println("=========================================")
-		fmt.Println(strings.Join(hashs, "\n"))
+		//fmt.Println(strings.Join(hashs, "\n"))
 		fmt.Println(res.StatusCode, res.Status)
 		fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
 		fmt.Println("=========================================")
+
 		hashSize := len(hashs)
+		jobs := pool.Jobs{}
 		for i := 0; i < hashSize; i++ {
 			fmt.Println(hashs[i])
-			fmt.Println(getDownloadUrl(hashs[i]))
+			USERNAME := USERNAME
+			i := i
+			jobs = append(jobs, func() interface{} {
+				fmt.Println(getDownloadUrl(hashs[i]))
+				USERNAME, _ = url.QueryUnescape(USERNAME)
+				fmt.Println(fmt.Sprintf("filename : %s_%s.mp4", USERNAME, hashs[i]))
+				return nil
+			})
 		}
+		pool.StartPool(jobs, 4)
 	}
 
 	et := time.Now()
 	fmt.Println("Total Time:", et.UnixMilli()-st.UnixMilli(), "ms")
 
+}
+
+func getUsername(s *string) (uname string) {
+	defer func() {
+		_, _ = recover().(error)
+	}()
+	reg, _ := regexp.Compile(`https://ecchi.iwara.tv/users/(.+?)(?:(/videos)|[?]|/|$)`)
+	uname = reg.FindAllStringSubmatch(*s, -1)[0][1]
+	return
 }
 
 func getBaseUrl(s *string) (err error) {
