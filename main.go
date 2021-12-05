@@ -1,19 +1,25 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"github.com/thftgr/iwaraDownloader/iwaraApi"
 	"github.com/thftgr/iwaraDownloader/pool"
+	"github.com/thftgr/iwaraDownloader/src"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"sync"
 	"time"
 )
 
-const videoHashRegex = `<a href="/videos/(.+?)(?:[?].+?|["])>`
+const rootDownloadPath = `./iwara/`
+
+func init() {
+	src.ReadDir(rootDownloadPath)
+}
 
 func main() {
 	var (
@@ -24,8 +30,8 @@ func main() {
 	st := time.Now()
 	URL = "https://ecchi.iwara.tv/users/%E8%BF%99%E8%85%BF%E5%80%9Fwo%E7%8E%A9%E4%B8%80%E5%A4%A9?language=ja"
 	//URL := "https://ecchi.iwara.tv/users/%E4%B8%89%E4%BB%81%E6%9C%88%E9%A5%BC"
-	err := getBaseUrl(&URL)
-	USERNAME = getUsername(&URL)
+	err := iwaraApi.GetBaseUrl(&URL)
+	USERNAME = iwaraApi.GetUsername(&URL)
 	if err != nil {
 		fmt.Println("cannot parse iwara user URL")
 		panic(err)
@@ -34,7 +40,7 @@ func main() {
 
 	res, err := http.Get(URL)
 	if err != nil {
-		logErr(err)
+		fmt.Println(err)
 		return
 	}
 	defer res.Body.Close()
@@ -45,7 +51,7 @@ func main() {
 		fmt.Println("client error: ", err)
 		fmt.Println("=========================================")
 	}
-	page := getMaxPage(&body) + 1
+	page := iwaraApi.GetMaxPage(&body) + 1
 	{
 		ch := make(chan struct{}, page)
 		var hashs []string
@@ -69,15 +75,11 @@ func main() {
 				}
 				defer res.Body.Close()
 				body, _ := ioutil.ReadAll(res.Body)
-				reg, err := regexp.Compile(videoHashRegex)
-				if err != nil {
-					logErr(err)
-					return
-				}
+				reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
 				urls := reg.FindAllStringSubmatch(string(body), -1)
 				mutex.Lock()
 				defer mutex.Unlock()
-				hashs = append(hashs, getSubMatchData(urls, 1)...)
+				hashs = append(hashs, iwaraApi.GetSubMatchData(urls, 1)...)
 			}()
 		}
 		for i := 0; i < page; i++ {
@@ -90,16 +92,38 @@ func main() {
 		fmt.Println("=========================================")
 
 		hashSize := len(hashs)
+
+		//hashSize = 1 //테스트용
+
 		jobs := pool.Jobs{}
 		for i := 0; i < hashSize; i++ {
 			fmt.Println(hashs[i])
-			USERNAME := USERNAME
+			dirName, _ := url.QueryUnescape(USERNAME)
 			i := i
+			if src.FileList[dirName] != nil {
+				if src.FileList[dirName][hashs[i]] != nil {
+					continue
+				}
+			}
 			jobs = append(jobs, func() interface{} {
-				fmt.Println(getDownloadUrl(hashs[i]))
-				USERNAME, _ = url.QueryUnescape(USERNAME)
-				fmt.Println(fmt.Sprintf("filename : %s_%s.mp4", USERNAME, hashs[i]))
-				return nil
+
+				downloadUrl, _ := iwaraApi.GetDownloadUrl(hashs[i])
+				fileName := fmt.Sprintf("%s_%s.mp4", dirName, hashs[i])
+				fmt.Println(downloadUrl)
+				fmt.Println(fmt.Sprintf("filename : %s_%s.mp4", dirName, hashs[i]))
+				fmt.Println("==========================================")
+				fmt.Println("started download.")
+				fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
+				fmt.Println("filename:", fileName)
+				fmt.Println("==========================================")
+				b, _ := iwaraApi.DownloadFile(&downloadUrl)
+				err = saveLocal(&b, rootDownloadPath+dirName+"/", fileName)
+				fmt.Println("==========================================")
+				fmt.Println("download Finished.")
+				fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
+				fmt.Println("filename:", fileName)
+				fmt.Println("==========================================")
+				return err
 			})
 		}
 		pool.StartPool(jobs, 4)
@@ -109,89 +133,23 @@ func main() {
 	fmt.Println("Total Time:", et.UnixMilli()-st.UnixMilli(), "ms")
 
 }
-
-func getUsername(s *string) (uname string) {
-	defer func() {
-		_, _ = recover().(error)
-	}()
-	reg, _ := regexp.Compile(`https://ecchi.iwara.tv/users/(.+?)(?:(/videos)|[?]|/|$)`)
-	uname = reg.FindAllStringSubmatch(*s, -1)[0][1]
-	return
-}
-
-func getBaseUrl(s *string) (err error) {
+func saveLocal(data *[]byte, dir, name string) (err error) {
 	defer func() {
 		err, _ = recover().(error)
 	}()
-	reg, _ := regexp.Compile(`(https://ecchi.iwara.tv/users/.+?)(?:(/videos)|[?]|/|$)`)
-	*s = reg.FindAllStringSubmatch(*s, -1)[0][1] + "/videos"
-	return
-}
-
-func logErr(err error) {
-	fmt.Println("=========================================")
-	fmt.Println("client error: ", err)
-	fmt.Println("=========================================")
-}
-
-func getSubMatchData(sa [][]string, index int) (sr []string) {
-
-	allKeys := make(map[string]bool)
-
-	for _, item := range sa {
-		if len(item) < index+1 {
-			continue
-		}
-		if _, value := allKeys[item[index]]; !value {
-			allKeys[item[index]] = true
-			sr = append(sr, item[index])
-		}
+	fullPath := dir + "_" + name
+	_ = os.MkdirAll(dir, 775)
+	file, _ := os.Create(fullPath + ".idownload")
+	if file == nil {
+		return
 	}
-	return
-}
+	_, _ = file.Write(*data)
+	file.Close()
 
-type downloadUrlStruct struct {
-	Resolution string `json:"resolution"`
-	Uri        string `json:"uri"`
-	Mime       string `json:"mime"`
-}
-
-const downloadBaseUrl = `https://ecchi.iwara.tv/api/video/`
-
-func getDownloadUrl(hashs string) (urls string, err error) {
-	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
-		err, _ = recover().(error) // 프로그램이 죽는경우 살린다
-		if err != nil {            // 죽이고 살린 후 처리
-			fmt.Println(err)
-		}
-	}()
-	res, _ := http.Get(downloadBaseUrl + hashs)
-	defer res.Body.Close()
-	body, _ := ioutil.ReadAll(res.Body)
-
-	var ress []downloadUrlStruct
-	_ = json.Unmarshal(body, &ress)
-
-	for i := 0; i < len(ress); i++ {
-		if ress[i].Resolution == `Source` {
-			urls = `https:` + ress[i].Uri
-			return
-		}
+	if _, err = os.Stat(fullPath); !os.IsNotExist(err) {
+		_ = os.Remove(fullPath)
 	}
-	return
-}
+	_ = os.Rename(fullPath+".idownload", fullPath)
 
-func getMaxPage(body *[]byte) (page int) {
-	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
-		err, _ := recover().(error) // 프로그램이 죽는경우 살린다
-		if err != nil {             // 죽이고 살린 후 처리
-			fmt.Println(err)
-			page = 0
-		}
-	}()
-
-	reg, _ := regexp.Compile(`<li class="pager-last last"><a title=".+?" href="/users/.+?/videos\?.*?page=([0-9]{1,3})">`)
-	urls := reg.FindAllStringSubmatch(string(*body), -1)
-	page, _ = strconv.Atoi(urls[0][1]) // 널 포인터 에러가 날것임 => 별다른 처리가 없다면 프로그램이 죽는다
 	return
 }
