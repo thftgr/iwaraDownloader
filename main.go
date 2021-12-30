@@ -18,9 +18,9 @@ import (
 	"time"
 )
 
-var rootDownloadPath = `./iwara`
+//var rootDownloadPath = `./iwara`
 
-//const rootDownloadPath = `Y:/private/iwara/`
+var rootDownloadPath = `Y:/private/iwara/`
 
 func init() {
 	if rootDownloadPath[len(rootDownloadPath)-1:] != "/" {
@@ -41,9 +41,11 @@ func init() {
 }
 
 func main() {
-	for _, uploader := range src.Uploaders {
-		syncs(uploader)
-	}
+	//腿 玩 年
+	syncs("腿 玩 年")
+	//for _, uploader := range src.Uploaders {
+	//	syncs(uploader)
+	//}
 }
 
 func syncs(username string) {
