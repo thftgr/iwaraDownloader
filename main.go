@@ -42,7 +42,8 @@ func init() {
 
 func main() {
 	//腿 玩 年
-	syncs("腿 玩 年")
+	syncs("xinhai999")
+	//syncs("腿 玩 年")
 	//for _, uploader := range src.Uploaders {
 	//	syncs(uploader)
 	//}
