@@ -1,0 +1,12 @@
+{
+  "fileIndex": {
+    "{username}": [
+      "{filename}",
+      "{filename}"
+    ],
+    "{filename}": {
+      "username": "{username}",
+      "filename": "filename"
+    }
+  }
+}

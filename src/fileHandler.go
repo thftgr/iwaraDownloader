@@ -1,89 +1,50 @@
 package src
 
 import (
-	"fmt"
-	"io/fs"
-	"io/ioutil"
+	"github.com/thftgr/iwaraDownloader/config"
+	"os"
 	"regexp"
-	"strings"
-	"sync"
 )
 
-type FileData struct {
-	ServerKey       string
-	Uploader        string
-	FullPath        string
-	File            fs.FileInfo
-	UploaderMatched bool
+type fileIndex struct {
+	Username map[string][]string // filename array
+	Filename map[string]string   // username
+	DirName  map[string]string   // username
 }
 
 var (
-	//FileList    = map[string]fs.FileInfo{}
-	FileList       = map[string]FileData{}
-	FileByUploader = map[string][]string{}
-	Uploaders      = []string{}
-	mutex          = sync.Mutex{}
-	regFilename    *regexp.Regexp
+	FileIndex = fileIndex{
+		Username: map[string][]string{},
+		Filename: map[string]string{},
+		DirName:  map[string]string{},
+	}
+	regFilename, _ = regexp.Compile(`(.*)_([A-Za-z0-9]{15,20})[.]mp4`)
 )
 
 func init() {
-	regFilename, _ = regexp.Compile(`(.+)_([A-Za-z0-9]{15,20})[.]mp4`)
+	ReadAllFiles()
 }
 
-func ReadDir(path string) {
-	defer func() {
-		err, _ := recover().(error)
-		if err != nil {
-			fmt.Println("", err)
+func ReadAllFiles() {
+	root := config.RoorDir
+	dirs, _ := os.ReadDir(root) // ROOT/{usernmae}
+	for _, dir := range dirs {
+		if !dir.IsDir() {
+			continue
 		}
-	}()
-	if path[len(path)-1:] == "/" {
-		path = path[:len(path)-1]
-	}
 
-	files, _ := ioutil.ReadDir(path)
-	for _, file := range files {
-		fileName := file.Name()
-
-		if file.IsDir() {
-			if path[len(path)-1:] != "/" {
-				path += "/"
-			}
-			fmt.Println("find Dir:", path+fileName)
-			ReadDir(path + fileName)
-			Uploaders = append(Uploaders, fileName)
-		} else {
-			if !regFilename.Match([]byte(fileName)) {
+		files, _ := os.ReadDir(root + dir.Name()) // ROOT/{usernmae}/{usernmae}_{filename}
+		for _, file := range files {
+			if file.IsDir() {
 				continue
 			}
-			r := regFilename.FindAllStringSubmatch(fileName, -1)[0]
-			uploader := r[1]
-			serverKey := r[2]
-			mutex.Lock()
-
-			FileList[strings.ToUpper(serverKey)] = FileData{
-				ServerKey: serverKey,
-				Uploader:  uploader,
-				FullPath:  path,
-				File:      file,
+			if !regFilename.Match([]byte(file.Name())) {
+				continue
 			}
-			FileByUploader[uploader] = append(FileByUploader[uploader], serverKey)
-			mutex.Unlock()
-
+			r := regFilename.FindAllStringSubmatch(file.Name(), -1)[0]
+			FileIndex.Filename[r[2]] = r[1]
+			FileIndex.DirName[r[2]] = dir.Name()
+			FileIndex.Username[r[1]] = append(FileIndex.Username[r[1]], r[2])
 		}
 	}
-	Uploaders = removeDuplicate(Uploaders)
-
-}
-func removeDuplicate(sa []string) (sr []string) {
-
-	allKeys := make(map[string]bool)
-
-	for _, item := range sa {
-		if _, value := allKeys[item]; !value {
-			allKeys[item] = true
-			sr = append(sr, item)
-		}
-	}
-	return
 }

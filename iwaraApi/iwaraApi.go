@@ -8,24 +8,35 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"sync"
+	"time"
 )
 
-const downloadBaseUrl = `https://ecchi.iwara.tv/api/video/`
+type User struct {
+	Username string
+	Keys     []string
+}
 
-func GetAllHashByUsername(username string) (hashes *[]string) {
-	var (
-		URL string
-	)
-
-	URL = "https://ecchi.iwara.tv/users/" + username
-	err := GetBaseUrl(&URL)
+func FindUsername(filename *string) (username string) {
+	defer func() {
+		_, _ = recover().(error)
+	}()
+	//class="username">清炽</a>
+	url := `https://ecchi.iwara.tv/videos/` + *filename
+	r, err := Fetch(&url)
 	if err != nil {
-		fmt.Println("cannot parse iwara user URL")
-		return
+		log.Println(err)
 	}
-	fmt.Println(URL)
+	reg, _ := regexp.Compile(`class="username">(.+?)</a>`)
+	username = reg.FindAllStringSubmatch(string(r), -1)[0][1]
+	time.Sleep(time.Second)
 
+	return
+}
+
+func GetAllFilenameByUsername(username string) (filename *[]string) {
+
+	URL := "https://ecchi.iwara.tv/users/" + username + "/videos"
+	log.Println(URL)
 	res, err := http.Get(URL)
 	if err != nil {
 		log.Println(err)
@@ -41,57 +52,33 @@ func GetAllHashByUsername(username string) (hashes *[]string) {
 	}
 	page := GetMaxPage(&body) + 1
 
-	ch := make(chan struct{}, page)
 	var hashs []string
-	mutex := sync.Mutex{}
 	for i := 0; i < page; i++ {
-		i := i
-		go func() {
-			defer func() {
-				ch <- struct{}{}
-				err, _ = recover().(error)
-				if err != nil {
-					log.Println(err)
-				}
-			}()
+		ress, errr := http.Get(URL + `?page=` + strconv.Itoa(i))
+		if errr != nil {
+			log.Println(errr)
+			continue
+		}
+		if ress.StatusCode != http.StatusOK {
+			fmt.Println("=========================================")
+			fmt.Println(username)
+			fmt.Println(ress.StatusCode, ress.Status)
+			fmt.Println("=========================================")
+		}
+		defer ress.Body.Close()
+		bodyy, _ := ioutil.ReadAll(ress.Body)
+		reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
+		urls := reg.FindAllStringSubmatch(string(bodyy), -1)
+		hashs = append(hashs, GetSubMatchData(urls, 1)...)
+	}
 
-			res, _ := http.Get(URL + `?page=` + strconv.Itoa(i))
-			if res.StatusCode != http.StatusOK {
-				fmt.Println("=========================================")
-				fmt.Println(res.StatusCode, res.Status)
-				fmt.Println("=========================================")
-			}
-			defer res.Body.Close()
-			body, _ := ioutil.ReadAll(res.Body)
-			reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
-			urls := reg.FindAllStringSubmatch(string(body), -1)
-			mutex.Lock()
-			defer mutex.Unlock()
-			hashs = append(hashs, GetSubMatchData(urls, 1)...)
-		}()
-	}
-	for i := 0; i < page; i++ {
-		<-ch
-	}
 	fmt.Println("=========================================")
-	//fmt.Println(strings.Join(hashs, "\n"))
+	fmt.Println(fmt.Sprintf("%s =>%s", URL, username))
 	fmt.Println(res.StatusCode, res.Status)
 	fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
 	fmt.Println("=========================================")
 	return &hashs
 
-}
-
-func FindUsername(hash *string) (username string) {
-	defer func() {
-		_, _ = recover().(error)
-	}()
-	//class="username">清炽</a>
-	url := `https://ecchi.iwara.tv/videos/` + *hash
-	r, _ := Fetch(&url)
-	reg, _ := regexp.Compile(`class="username">(.+?)</a>`)
-	username = reg.FindAllStringSubmatch(string(r), -1)[0][1]
-	return
 }
 
 func GetUsername(s *string) (uname string) {
@@ -141,7 +128,7 @@ func GetDownloadUrl(hashs string) (urls string, err error) {
 			log.Println(err)
 		}
 	}()
-	res, _ := http.Get(downloadBaseUrl + hashs)
+	res, _ := http.Get("https://ecchi.iwara.tv/api/video/" + hashs)
 	defer res.Body.Close()
 	body, _ := ioutil.ReadAll(res.Body)
 
