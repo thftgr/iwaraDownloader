@@ -6,15 +6,10 @@ import (
 	"github.com/thftgr/iwaraDownloader/iwaraApi"
 	"github.com/thftgr/iwaraDownloader/pool"
 	"github.com/thftgr/iwaraDownloader/src"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"net/url"
 	"os"
-	"regexp"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -28,6 +23,8 @@ func init() {
 	}
 	log.SetFlags(log.Ldate | log.Ltime | log.Llongfile | log.Lmsgprefix)
 	src.ReadDir(rootDownloadPath)
+	fmt.Println(len(src.Uploaders), "uploaders.")
+	fmt.Println(len(src.FileList), "files.")
 
 	//indent, _ := json.MarshalIndent(src.FileList, "", "  ")
 	//fmt.Println(string(indent))
@@ -40,10 +37,15 @@ func init() {
 
 }
 
+//TODO
+
 func main() {
+	//hash := `yxzkpimvl2tobal8j`
+	//fmt.Println(iwaraApi.FindUsername(&hash))
+
 	//腿 玩 年
-	syncs("xinhai999")
-	//syncs("腿 玩 年")
+	//syncs("xinhai999")
+	syncs("腿 玩 年")
 	//for _, uploader := range src.Uploaders {
 	//	syncs(uploader)
 	//}
@@ -51,73 +53,9 @@ func main() {
 
 func syncs(username string) {
 	//return
-	var (
-		USERNAME = url.QueryEscape(username)
-		URL      string
-	)
-
 	st := time.Now()
-
-	URL = "https://ecchi.iwara.tv/users/" + USERNAME
-	err := iwaraApi.GetBaseUrl(&URL)
-	if err != nil {
-		fmt.Println("cannot parse iwara user URL")
-		return
-	}
-	fmt.Println(URL)
-
-	res, err := http.Get(URL)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println("=========================================")
-		fmt.Println(res.StatusCode, res.Status)
-		fmt.Println("client error: ", err)
-		fmt.Println("=========================================")
-	}
-	page := iwaraApi.GetMaxPage(&body) + 1
-
-	ch := make(chan struct{}, page)
-	var hashs []string
-	mutex := sync.Mutex{}
-	for i := 0; i < page; i++ {
-		i := i
-		go func() {
-			defer func() {
-				ch <- struct{}{}
-				err, _ = recover().(error)
-				if err != nil {
-					log.Println(err)
-				}
-			}()
-
-			res, _ := http.Get(URL + `?page=` + strconv.Itoa(i))
-			if res.StatusCode != http.StatusOK {
-				fmt.Println("=========================================")
-				fmt.Println(res.StatusCode, res.Status)
-				fmt.Println("=========================================")
-			}
-			defer res.Body.Close()
-			body, _ := ioutil.ReadAll(res.Body)
-			reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
-			urls := reg.FindAllStringSubmatch(string(body), -1)
-			mutex.Lock()
-			defer mutex.Unlock()
-			hashs = append(hashs, iwaraApi.GetSubMatchData(urls, 1)...)
-		}()
-	}
-	for i := 0; i < page; i++ {
-		<-ch
-	}
-	fmt.Println("=========================================")
-	//fmt.Println(strings.Join(hashs, "\n"))
-	fmt.Println(res.StatusCode, res.Status)
-	fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
-	fmt.Println("=========================================")
+	USERNAME := url.QueryEscape(username)
+	hashs := *iwaraApi.GetAllHashByUsername(USERNAME)
 
 	hashSize := len(hashs)
 
@@ -125,7 +63,7 @@ func syncs(username string) {
 
 	jobs := pool.Jobs{}
 	for i := 0; i < hashSize; i++ {
-		dirName, _ := url.QueryUnescape(USERNAME)
+		dirName := USERNAME
 		i := i
 
 		if src.FileList[strings.ToUpper(hashs[i])].File != nil {
@@ -146,8 +84,8 @@ func syncs(username string) {
 			fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
 			fmt.Println("filename:", fileName)
 			fmt.Println("==========================================")
-			b, _ := iwaraApi.DownloadFile(&downloadUrl)
-			err = saveLocal(&b, rootDownloadPath+dirName+"/", fileName)
+			b, _ := iwaraApi.Fetch(&downloadUrl)
+			err := saveLocal(&b, rootDownloadPath+dirName+"/", fileName)
 			fmt.Println("==========================================")
 			fmt.Println("download Finished.")
 			fmt.Println("path:", rootDownloadPath+dirName+"/"+fileName)
@@ -163,6 +101,7 @@ func syncs(username string) {
 	et := time.Now()
 	fmt.Println("Total Time:", et.UnixMilli()-st.UnixMilli(), "ms")
 }
+
 func saveLocal(data *[]byte, dir, name string) (err error) {
 	defer func() {
 		err, _ = recover().(error)

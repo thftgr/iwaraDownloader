@@ -10,18 +10,20 @@ import (
 )
 
 type FileData struct {
-	ServerKey string
-	Uploader  string
-	FullPath  string
-	File      fs.FileInfo
+	ServerKey       string
+	Uploader        string
+	FullPath        string
+	File            fs.FileInfo
+	UploaderMatched bool
 }
 
 var (
 	//FileList    = map[string]fs.FileInfo{}
-	FileList    = map[string]FileData{}
-	Uploaders   = []string{}
-	mutex       = sync.Mutex{}
-	regFilename *regexp.Regexp
+	FileList       = map[string]FileData{}
+	FileByUploader = map[string][]string{}
+	Uploaders      = []string{}
+	mutex          = sync.Mutex{}
+	regFilename    *regexp.Regexp
 )
 
 func init() {
@@ -65,6 +67,7 @@ func ReadDir(path string) {
 				FullPath:  path,
 				File:      file,
 			}
+			FileByUploader[uploader] = append(FileByUploader[uploader], serverKey)
 			mutex.Unlock()
 
 		}

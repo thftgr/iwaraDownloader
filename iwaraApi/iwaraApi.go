@@ -2,14 +2,97 @@ package iwaraApi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync"
 )
 
 const downloadBaseUrl = `https://ecchi.iwara.tv/api/video/`
+
+func GetAllHashByUsername(username string) (hashes *[]string) {
+	var (
+		URL string
+	)
+
+	URL = "https://ecchi.iwara.tv/users/" + username
+	err := GetBaseUrl(&URL)
+	if err != nil {
+		fmt.Println("cannot parse iwara user URL")
+		return
+	}
+	fmt.Println(URL)
+
+	res, err := http.Get(URL)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println("=========================================")
+		fmt.Println(res.StatusCode, res.Status)
+		fmt.Println("client error: ", err)
+		fmt.Println("=========================================")
+	}
+	page := GetMaxPage(&body) + 1
+
+	ch := make(chan struct{}, page)
+	var hashs []string
+	mutex := sync.Mutex{}
+	for i := 0; i < page; i++ {
+		i := i
+		go func() {
+			defer func() {
+				ch <- struct{}{}
+				err, _ = recover().(error)
+				if err != nil {
+					log.Println(err)
+				}
+			}()
+
+			res, _ := http.Get(URL + `?page=` + strconv.Itoa(i))
+			if res.StatusCode != http.StatusOK {
+				fmt.Println("=========================================")
+				fmt.Println(res.StatusCode, res.Status)
+				fmt.Println("=========================================")
+			}
+			defer res.Body.Close()
+			body, _ := ioutil.ReadAll(res.Body)
+			reg, _ := regexp.Compile(`<a href="/videos/(.+?)(?:[?].+?|["])>`)
+			urls := reg.FindAllStringSubmatch(string(body), -1)
+			mutex.Lock()
+			defer mutex.Unlock()
+			hashs = append(hashs, GetSubMatchData(urls, 1)...)
+		}()
+	}
+	for i := 0; i < page; i++ {
+		<-ch
+	}
+	fmt.Println("=========================================")
+	//fmt.Println(strings.Join(hashs, "\n"))
+	fmt.Println(res.StatusCode, res.Status)
+	fmt.Println(fmt.Sprintf("find %d keys from %d page", len(hashs), page))
+	fmt.Println("=========================================")
+	return &hashs
+
+}
+
+func FindUsername(hash *string) (username string) {
+	defer func() {
+		_, _ = recover().(error)
+	}()
+	//class="username">清炽</a>
+	url := `https://ecchi.iwara.tv/videos/` + *hash
+	r, _ := Fetch(&url)
+	reg, _ := regexp.Compile(`class="username">(.+?)</a>`)
+	username = reg.FindAllStringSubmatch(string(r), -1)[0][1]
+	return
+}
 
 func GetUsername(s *string) (uname string) {
 	defer func() {
@@ -88,7 +171,7 @@ func GetMaxPage(body *[]byte) (page int) {
 	return
 }
 
-func DownloadFile(url *string) (data []byte, err error) {
+func Fetch(url *string) (data []byte, err error) {
 	defer func() {
 		err, _ = recover().(error)
 	}()
