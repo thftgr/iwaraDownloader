@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -121,6 +122,7 @@ type downloadUrlStruct struct {
 	Mime       string `json:"mime"`
 }
 
+//mikoto 호스트가 가장 빠름 //mikoto.iwara.tv
 func GetDownloadUrl(hashs string) (urls string, err error) {
 	defer func() { // 함수 빠져나가기 직전 무조건 실행된다
 		err, _ = recover().(error) // 프로그램이 죽는경우 살린다
@@ -128,19 +130,24 @@ func GetDownloadUrl(hashs string) (urls string, err error) {
 			log.Println(err)
 		}
 	}()
-	res, _ := http.Get("https://ecchi.iwara.tv/api/video/" + hashs)
-	defer res.Body.Close()
-	body, _ := ioutil.ReadAll(res.Body)
+	for {
 
-	var ress []downloadUrlStruct
-	_ = json.Unmarshal(body, &ress)
+		res, _ := http.Get("https://ecchi.iwara.tv/api/video/" + hashs)
+		body, _ := ioutil.ReadAll(res.Body)
+		res.Body.Close()
 
-	for i := 0; i < len(ress); i++ {
-		if ress[i].Resolution == `Source` {
-			urls = `https:` + ress[i].Uri
-			return
+		var ress []downloadUrlStruct
+		_ = json.Unmarshal(body, &ress)
+
+		for i := 0; i < len(ress); i++ {
+			if ress[i].Resolution == `Source` && strings.Contains(ress[i].Uri, "mikoto.iwara.tv") {
+				urls = `https:` + ress[i].Uri
+				return
+			}
 		}
+		time.Sleep(time.Millisecond * 500)
 	}
+
 	return
 }
 

@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"github.com/cheggaaa/pb/v3"
 	"github.com/pterm/pterm"
 	"github.com/thftgr/iwaraDownloader/config"
 	"github.com/thftgr/iwaraDownloader/iwaraApi"
 	"github.com/thftgr/iwaraDownloader/src"
+	"io"
 	"log"
+	"net/http"
 	"os"
 )
 
@@ -25,6 +30,8 @@ import (
 //TODO 3. 1번항목의 파일명과 유저네임이 일치하는지 확인
 //TODO 4. 3번 false인 경우 기존 유저네임으로 파일명들 추출
 //TODO 5. 기존 파일명을 신규 파일명으로 일괄 업데이트 후 캐싱 다시 실행
+
+var urlOnly bool
 
 func init() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Llongfile | log.Lmsgprefix)
@@ -51,7 +58,7 @@ func main() {
 	for filename, usernmae := range src.FileIndex.Filename {
 		ii++
 		if endedFilename[filename] {
-			log.Printf("pass %s_%s.mp4", usernmae, filename)
+			//log.Printf("pass %s_%s.mp4", usernmae, filename)
 			continue
 		}
 		fmt.Println("\n\nvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
@@ -62,29 +69,42 @@ func main() {
 		if newUsername == "" {
 			continue
 		}
-		//if (newUsername == "" || newUsername == usernmae) && src.FileIndex.DirName[filename] == usernmae {
-		//	for _, filename := range filenames {
-		//		endedFilename[filename] = true
-		//	}
-		//	continue
-		//}
+
 		if err := os.MkdirAll(config.RoorDir+newUsername, 775); err != nil {
 			log.Println(err)
 		}
 
-		//filenames := src.FileIndex.Username[usernmae]
 		for _, filename := range filenames {
 			if src.FileIndex.DirName[filename] == "" {
-				log.Println(pterm.Red("NOT Downloaded File. ", filename))
+				if urlOnly {
+					log.Println("X\t", filename)
+					err := saveUrl(filename)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+				} else {
+					log.Println(pterm.Red("X start Download ", filename))
+					err := download(newUsername, filename)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					log.Println(pterm.Green("O finish Download ", filename))
+				}
+
 				continue
+			} else {
+				log.Println(pterm.Green("O\t", filename))
 			}
 			oldFilename := fmt.Sprintf("%s%s/%s_%s.mp4", config.RoorDir, src.FileIndex.DirName[filename], usernmae, filename)
 			newFilename := fmt.Sprintf("%s%s/%s_%s.mp4", config.RoorDir, newUsername, newUsername, filename)
+			endedFilename[filename] = true
+
 			if oldFilename == newFilename {
 				continue
 			}
 			log.Printf("rename %s to %s | %v\n", oldFilename, newFilename, os.Rename(oldFilename, newFilename))
-			endedFilename[filename] = true
 		}
 		de, _ := os.ReadDir(config.RoorDir + src.FileIndex.DirName[filename])
 		if len(de) < 1 {
@@ -92,7 +112,49 @@ func main() {
 		}
 	}
 }
+func saveUrl(filename string) (err error) {
+	f, err := os.OpenFile("iwaraUrls.txt", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0777)
+	if err != nil {
+		return
+	}
+	_, err = f.WriteString("https://ecchi.iwara.tv/videos/" + filename + "\r\n")
+	return
 
+}
+func download(usernmae, filename string) (err error) {
+	downloadUrl, err := iwaraApi.GetDownloadUrl(filename)
+	if err != nil {
+		log.Println(err)
+	}
+	res, err := http.Get(downloadUrl)
+	if err != nil {
+		log.Println(err)
+		return
+
+	}
+	if res.StatusCode != http.StatusOK {
+		return errors.New(res.Status)
+	}
+	defer res.Body.Close()
+
+	bar := pb.Full.Start64(res.ContentLength)
+
+	// create proxy reader
+	barReader := bar.NewProxyReader(res.Body)
+
+	// copy from proxy reader
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, barReader)
+
+	// finish bar
+	bar.Finish()
+	dir := fmt.Sprintf("%s%s", config.RoorDir, usernmae)
+	newFilename := fmt.Sprintf("%s_%s.mp4", usernmae, filename)
+	return saveLocal(&buf, dir, newFilename)
+
+}
+
+//
 //TODO
 //526ad5a9d46b4330e1d105232106f948fef75f49   OgVZVfZ5jys65Yk91
 //func main() {
@@ -181,7 +243,7 @@ func main() {
 //	fmt.Println("Total Time:", et.UnixMilli()-st.UnixMilli(), "ms")
 //}
 
-func saveLocal(data *[]byte, dir, name string) (err error) {
+func saveLocal(data *bytes.Buffer, dir, name string) (err error) {
 	defer func() {
 		err, _ = recover().(error)
 	}()
@@ -194,7 +256,8 @@ func saveLocal(data *[]byte, dir, name string) (err error) {
 	if file == nil {
 		return
 	}
-	_, _ = file.Write(*data)
+
+	_, _ = file.Write(data.Bytes())
 	file.Close()
 
 	if _, err = os.Stat(fullPath); !os.IsNotExist(err) {
